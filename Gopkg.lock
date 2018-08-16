@@ -3,35 +3,47 @@
 
 [[projects]]
   branch = "master"
+  digest = "1:d1971637b21871ec2033a44ca87c99c5608a7340cb34ec75fab8d2ab503276c9"
   name = "github.com/hashicorp/errwrap"
   packages = ["."]
+  pruneopts = "UT"
   revision = "d6c0cd88035724dd42e0f335ae30161c20575ecc"
 
 [[projects]]
   branch = "master"
+  digest = "1:46fb6a9f1b9667f32ac93e08b1da118b2c666991424ea12e848b05d4fe5155ef"
   name = "github.com/hashicorp/go-multierror"
   packages = ["."]
+  pruneopts = "UT"
   revision = "3d5d8f294aa03d8e98859feac328afbdf1ae0703"
 
 [[projects]]
+  digest = "1:4de8528c22261e2ffc2dfa8ec93c5b7f8078890ad118e4b7259b67ded4eeaa5e"
   name = "github.com/veandco/go-sdl2"
   packages = ["sdl"]
+  pruneopts = "UT"
   revision = "271d2ec43388932fd2a80f4c2e81021734685a62"
   version = "v0.3"
 
 [[projects]]
+  digest = "1:1b60ed37620f3f2ddc4d7e17341dc146c1e007f3d799653b93b6324373670247"
   name = "gobot.io/x/gobot"
   packages = [
     ".",
     "platforms/dji/tello",
-    "platforms/joystick"
+    "platforms/joystick",
   ]
+  pruneopts = "UT"
   revision = "c1d0e3ce485df0b45076d1d93b7d9240b770d5fc"
   version = "1.11.1"
 
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "5de1c2ad073b944c5eae5127f5fbf8636e94c7af83f316e8a2915876c955d922"
+  input-imports = [
+    "gobot.io/x/gobot",
+    "gobot.io/x/gobot/platforms/dji/tello",
+    "gobot.io/x/gobot/platforms/joystick",
+  ]
   solver-name = "gps-cdcl"
   solver-version = 1
