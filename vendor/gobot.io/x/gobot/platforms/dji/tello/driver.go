@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"strconv"
 	"sync"
@@ -182,8 +183,8 @@ type WifiData struct {
 type Driver struct {
 	name           string
 	reqAddr        string
-	reqConn        *net.UDPConn // UDP connection to send/receive drone commands
-	videoConn      *net.UDPConn // UDP connection for drone video
+	cmdConn        io.WriteCloser // UDP connection to send/receive drone commands
+	videoConn      *net.UDPConn   // UDP connection for drone video
 	respPort       string
 	videoPort      string
 	cmdMutex       sync.Mutex
@@ -243,16 +244,22 @@ func (d *Driver) Start() error {
 		fmt.Println(err)
 		return err
 	}
-	d.reqConn, err = net.DialUDP("udp", respPort, reqAddr)
+	cmdConn, err := net.DialUDP("udp", respPort, reqAddr)
 	if err != nil {
 		fmt.Println(err)
 		return err
 	}
+	d.cmdConn = cmdConn
 
 	// handle responses
 	go func() {
+		d.On(d.Event(ConnectedEvent), func(interface{}) {
+			d.SendDateTime()
+			d.processVideo()
+		})
+
 		for {
-			err := d.handleResponse()
+			err := d.handleResponse(cmdConn)
 			if err != nil {
 				fmt.Println("response parse error:", err)
 			}
@@ -278,7 +285,12 @@ func (d *Driver) Start() error {
 
 // Halt stops the driver.
 func (d *Driver) Halt() (err error) {
-	d.reqConn.Close()
+	// send a landing command when we disconnect, and give it 500ms to be received before we shutdown
+	d.Land()
+	time.Sleep(500 * time.Millisecond)
+
+	// TODO: cleanly shutdown the goroutines that are handling the UDP connections before closing
+	d.cmdConn.Close()
 	d.videoConn.Close()
 	return
 }
@@ -290,7 +302,7 @@ func (d *Driver) TakeOff() (err error) {
 	binary.Write(buf, binary.LittleEndian, d.seq)
 	binary.Write(buf, binary.LittleEndian, CalculateCRC16(buf.Bytes()))
 
-	_, err = d.reqConn.Write(buf.Bytes())
+	_, err = d.cmdConn.Write(buf.Bytes())
 	return
 }
 
@@ -301,7 +313,7 @@ func (d *Driver) ThrowTakeOff() (err error) {
 	binary.Write(buf, binary.LittleEndian, d.seq)
 	binary.Write(buf, binary.LittleEndian, CalculateCRC16(buf.Bytes()))
 
-	_, err = d.reqConn.Write(buf.Bytes())
+	_, err = d.cmdConn.Write(buf.Bytes())
 	return
 }
 
@@ -313,7 +325,7 @@ func (d *Driver) Land() (err error) {
 	binary.Write(buf, binary.LittleEndian, byte(0x00))
 	binary.Write(buf, binary.LittleEndian, CalculateCRC16(buf.Bytes()))
 
-	_, err = d.reqConn.Write(buf.Bytes())
+	_, err = d.cmdConn.Write(buf.Bytes())
 	return
 }
 
@@ -325,7 +337,7 @@ func (d *Driver) StopLanding() (err error) {
 	binary.Write(buf, binary.LittleEndian, byte(0x01))
 	binary.Write(buf, binary.LittleEndian, CalculateCRC16(buf.Bytes()))
 
-	_, err = d.reqConn.Write(buf.Bytes())
+	_, err = d.cmdConn.Write(buf.Bytes())
 	return
 }
 
@@ -337,7 +349,7 @@ func (d *Driver) PalmLand() (err error) {
 	binary.Write(buf, binary.LittleEndian, byte(0x00))
 	binary.Write(buf, binary.LittleEndian, CalculateCRC16(buf.Bytes()))
 
-	_, err = d.reqConn.Write(buf.Bytes())
+	_, err = d.cmdConn.Write(buf.Bytes())
 	return
 }
 
@@ -347,7 +359,7 @@ func (d *Driver) StartVideo() (err error) {
 	binary.Write(buf, binary.LittleEndian, int16(0x00)) // seq = 0
 	binary.Write(buf, binary.LittleEndian, CalculateCRC16(buf.Bytes()))
 
-	_, err = d.reqConn.Write(buf.Bytes())
+	_, err = d.cmdConn.Write(buf.Bytes())
 	return
 }
 
@@ -363,7 +375,7 @@ func (d *Driver) SetExposure(level int) (err error) {
 	binary.Write(buf, binary.LittleEndian, byte(level))
 	binary.Write(buf, binary.LittleEndian, CalculateCRC16(buf.Bytes()))
 
-	_, err = d.reqConn.Write(buf.Bytes())
+	_, err = d.cmdConn.Write(buf.Bytes())
 	return
 }
 
@@ -375,7 +387,7 @@ func (d *Driver) SetVideoEncoderRate(rate VideoBitRate) (err error) {
 	binary.Write(buf, binary.LittleEndian, byte(rate))
 	binary.Write(buf, binary.LittleEndian, CalculateCRC16(buf.Bytes()))
 
-	_, err = d.reqConn.Write(buf.Bytes())
+	_, err = d.cmdConn.Write(buf.Bytes())
 	return
 }
 
@@ -404,7 +416,7 @@ func (d *Driver) Rate() (err error) {
 	binary.Write(buf, binary.LittleEndian, d.seq)
 	binary.Write(buf, binary.LittleEndian, CalculateCRC16(buf.Bytes()))
 
-	_, err = d.reqConn.Write(buf.Bytes())
+	_, err = d.cmdConn.Write(buf.Bytes())
 	return
 }
 
@@ -481,6 +493,24 @@ func (d *Driver) CounterClockwise(val int) error {
 	return nil
 }
 
+// Hover tells the drone to stop moving on the X, Y, and Z axes and stay in place
+func (d *Driver) Hover() {
+	d.cmdMutex.Lock()
+	defer d.cmdMutex.Unlock()
+
+	d.rx = float32(0)
+	d.ry = float32(0)
+	d.ly = float32(0)
+}
+
+// CeaseRotation stops any rotational motion
+func (d *Driver) CeaseRotation() {
+	d.cmdMutex.Lock()
+	defer d.cmdMutex.Unlock()
+
+	d.lx = float32(0)
+}
+
 // Bounce tells drone to start/stop performing the bouncing action
 func (d *Driver) Bounce() (err error) {
 	buf, _ := d.createPacket(bounceCommand, 0x68, 1)
@@ -492,7 +522,7 @@ func (d *Driver) Bounce() (err error) {
 		binary.Write(buf, binary.LittleEndian, byte(0x30))
 	}
 	binary.Write(buf, binary.LittleEndian, CalculateCRC16(buf.Bytes()))
-	_, err = d.reqConn.Write(buf.Bytes())
+	_, err = d.cmdConn.Write(buf.Bytes())
 	d.bouncing = !d.bouncing
 	return
 }
@@ -505,7 +535,7 @@ func (d *Driver) Flip(direction FlipType) (err error) {
 	binary.Write(buf, binary.LittleEndian, byte(direction))
 	binary.Write(buf, binary.LittleEndian, CalculateCRC16(buf.Bytes()))
 
-	_, err = d.reqConn.Write(buf.Bytes())
+	_, err = d.cmdConn.Write(buf.Bytes())
 	return
 }
 
@@ -680,7 +710,7 @@ func (d *Driver) SendStickCommand() (err error) {
 
 	binary.Write(buf, binary.LittleEndian, CalculateCRC16(buf.Bytes()))
 
-	_, err = d.reqConn.Write(buf.Bytes())
+	_, err = d.cmdConn.Write(buf.Bytes())
 
 	return
 }
@@ -704,20 +734,20 @@ func (d *Driver) SendDateTime() (err error) {
 
 	binary.Write(buf, binary.LittleEndian, CalculateCRC16(buf.Bytes()))
 
-	_, err = d.reqConn.Write(buf.Bytes())
+	_, err = d.cmdConn.Write(buf.Bytes())
 	return
 }
 
 // SendCommand is used to send a text command such as the initial connection request to the drone.
 func (d *Driver) SendCommand(cmd string) (err error) {
-	_, err = d.reqConn.Write([]byte(cmd))
+	_, err = d.cmdConn.Write([]byte(cmd))
 	return
 }
 
-func (d *Driver) handleResponse() error {
+func (d *Driver) handleResponse(r io.Reader) error {
 	var buf [2048]byte
 	var msgType uint16
-	n, err := d.reqConn.Read(buf[0:])
+	n, err := r.Read(buf[0:])
 	if err != nil {
 		return err
 	}
@@ -767,8 +797,6 @@ func (d *Driver) handleResponse() error {
 	// parse text packet
 	if buf[0] == 0x63 && buf[1] == 0x6f && buf[2] == 0x6e {
 		d.Publish(d.Event(ConnectedEvent), nil)
-		d.SendDateTime()
-		d.processVideo()
 	}
 
 	return nil

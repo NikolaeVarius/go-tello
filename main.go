@@ -6,11 +6,11 @@ import (
 	"gobot.io/x/gobot/platforms/dji/tello"
 	"gobot.io/x/gobot/platforms/joystick"
 	// "io"
-	// "io/ioutil"
-	// "os"
-	// // "log"
-	// "os/exec"
-	// "strconv"
+	"io/ioutil"
+	"log"
+	"os"
+	"os/exec"
+	"strconv"
 	"sync/atomic"
 	"time"
 	// "gocv.io/x/gocv"
@@ -39,18 +39,17 @@ func main() {
 	stick := joystick.NewDriver(joystickAdaptor, "dualshock3")
 	// fmt.Println("mplayer")
 	// mplayer := exec.Command("mplayer", "-fps", "25", "-cache", "8192", "-")
-	// f, err := os.Create("/tmp/dat2")
+	f, err := os.Create("/tmp/dat2")
 
 	// window := gocv.NewWindow("Tello")
 
 	// fmt.Println("ffmpg")
-	// ffmpeg := exec.Command("ffmpeg", "-hwaccel", "auto", "-hwaccel_device", "opencl", "-i", "pipe:0",
-	// 	"-pix_fmt", "bgr24", "-s", strconv.Itoa(frameX)+"x"+strconv.Itoa(frameY), "-f", "rawvideo", "pipe:1")
-	// ffmpegIn, err := ffmpeg.StdinPipe()
-	// if err != nil {
-	// 	fmt.Println(err)
-	// 	return
-	// }
+	ffmpeg := exec.Command("ffmpeg", "-hwaccel", "auto", "-hwaccel_device", "opencl", "-i", "pipe:0", "-pix_fmt", "bgr24", "-s", strconv.Itoa(frameX)+"x"+strconv.Itoa(frameY), "-f", "rawvideo", "pipe:1")
+	ffmpegIn, err := ffmpeg.StdinPipe()
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
 
 	// mplayerIn, err := mplayer.StdinPipe()
 	// if err != nil {
@@ -58,17 +57,17 @@ func main() {
 	// 	return
 	// }
 	// fmt.Println("stdout")
-	// ffmpegStdout, err := ffmpeg.StdoutPipe()
+	ffmpegStdout, err := ffmpeg.StdoutPipe()
 	// mplayerStdout, err := mplayer.StdoutPipe()
 
-	// if err := ffmpeg.Start(); err != nil {
-	// 	log.Fatal(err)
-	// }
+	if err := ffmpeg.Start(); err != nil {
+		log.Fatal(err)
+	}
 	// if err := mplayer.Start(); err != nil {
 	// 	log.Fatal(err)
 	// }
-	// slurp, _ := ioutil.ReadAll(ffmpegStdout)
-	// fmt.Printf("%s\n", slurp)
+	slurp, _ := ioutil.ReadAll(ffmpegStdout)
+	fmt.Printf("%s\n", slurp)
 
 	// slurp1, _ := ioutil.ReadAll(mplayerStdout)
 	// fmt.Printf("%s\n", slurp1)
@@ -86,52 +85,46 @@ func main() {
 			fmt.Println("+++++++++++++++++++++++++++++++++++++++++++++++")
 			fmt.Println("Connected to Tello")
 			fmt.Println("+++++++++++++++++++++++++++++++++++++++++++++++")
-			// err := drone.StartVideo()
-			// if err != nil {
-			// 	fmt.Println(err)
-			// 	return
-			// }
+			err := drone.StartVideo()
+			if err != nil {
+				fmt.Println(err)
+				return
+			}
 
 			fmt.Println("Setting Video Encorder Rate")
 			drone.SetVideoEncoderRate(tello.VideoBitRateAuto)
 			fmt.Println("Setting Exposure")
 			drone.SetExposure(0)
-
 			gobot.Every(100*time.Millisecond, func() {
-				err := drone.StartVideo()
-
-				if err != nil {
-					fmt.Println(err)
-					return
-				}
+				drone.StartVideo()
 			})
 		})
 
-		// drone.On(tello.VideoFrameEvent, func(data interface{}) {
-		// 	fmt.Println("event")
-		// 	pkt := data.([]byte)
-		// 	// err := ioutil.WriteFile("/tmp/dat1", pkt, 0644)
+		drone.On(tello.VideoFrameEvent, func(data interface{}) {
+			fmt.Println("event")
+			pkt := data.([]byte)
+			// err := ioutil.WriteFile("/tmp/dat1", pkt, 0644)
 
-		// 	defer f.Close()
+			defer f.Close()
 
-		// 	if err != nil {
-		// 		panic(err)
-		// 	}
+			if err != nil {
+				panic(err)
+			}
 
-		// 	n2, err := f.Write(pkt)
-		// 	if err != nil {
-		// 		panic(err)
-		// 	}
-		// 	fmt.Printf("wrote %d bytes\n", n2)
-		// 	if _, err := mplayerIn.Write(pkt); err != nil {
-		// 		fmt.Println(err)
-		// 		return
-		// 	}
-		// 	// if _, err := ffmpegIn.Write(pkt); err != nil {
-		// 	// 	fmt.Println(err)
-		// 	// 	return
-		// 	// }
-		// })
+			n2, err := f.Write(pkt)
+			if err != nil {
+				panic(err)
+			}
+			fmt.Printf("wrote %d bytes\n", n2)
+			// if _, err := mplayerIn.Write(pkt); err != nil {
+			// 	fmt.Println(err)
+			// 	return
+			// }
+			if _, err := ffmpegIn.Write(pkt); err != nil {
+				fmt.Println(err)
+				return
+			}
+		})
 
 		stick.On(joystick.TrianglePress, func(data interface{}) {
 			fmt.Println("Taleoff Command")
