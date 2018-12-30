@@ -32,27 +32,29 @@ const (
 )
 
 var drone = tello.NewDriver("8888")
-var window = gocv.NewWindow("opencv")
+var window = gocv.NewWindow("Tello")
 var joystickAdaptor = joystick.NewAdaptor()
 var stick = joystick.NewDriver(joystickAdaptor, "dualshock3")
 var ffmpeg = exec.Command("ffmpeg", "-hwaccel", "auto", "-hwaccel_device", "opencl", "-i", "pipe:0", "-pix_fmt", "bgr24", "-s", strconv.Itoa(frameX)+"x"+strconv.Itoa(frameY), "-f", "rawvideo", "pipe:1")
+var ffmpegIn, _ = ffmpeg.StdinPipe()
+var ffmpegOut, _ = ffmpeg.StdoutPipe()
+var flightData *tello.FlightData
 
 func init() {
 	controller_listener()
-}
-
-func main() {
-	fmt.Println("Starting Program")
-
-	ffmpegIn, err := ffmpeg.StdinPipe()
-	ffmpegOut, _ := ffmpeg.StdoutPipe()
-	if err != nil {
-		log.Fatal(err)
-	}
 
 	if err := ffmpeg.Start(); err != nil {
 		log.Fatal(err)
 	}
+
+	drone.On(tello.FlightDataEvent, func(data interface{}) {
+		flightData = data.(*tello.FlightData)
+	})
+
+}
+
+func main() {
+	fmt.Println("Starting Program")
 
 	work := func() {
 		fmt.Println("Starting Work")
